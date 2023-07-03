@@ -139,6 +139,9 @@ RUN set -eux; \
   # verify we have no "ruby" packages installed
   if dpkg -l | grep -i ruby; then exit 1; fi; \
   [ "$(command -v ruby)" = '/usr/local/bin/ruby' ]; \
+  # update bundler to latest version
+  gem update --system; \
+  gem install bundler; \
   # rough smoke test
   ruby --version; \
   gem --version; \
