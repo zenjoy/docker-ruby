@@ -1,7 +1,6 @@
 # docker-ruby
 
 [![Docker Hub](https://img.shields.io/badge/Docker%20Hub-zenjoy%2Fruby-lightgrey?style=flat)](https://hub.docker.com/r/zenjoy/ruby)
-[![GitHub tag (latest SemVer)](https://img.shields.io/github/v/tag/zenjoy/docker-ruby?label=version)](https://github.com/zenjoy/docker-ruby/tags)
 [![License](https://img.shields.io/github/license/zenjoy/docker-ruby)](https://github.com/zenjoy/docker-ruby/blob/main/LICENSE)
 
 The official [Debian](https://hub.docker.com/_/debian) Docker image with Ruby.
