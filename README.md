@@ -5,8 +5,8 @@
 
 The official [Debian](https://hub.docker.com/_/debian) Docker image with Ruby.
 
-Available on [Docker Hub](https://hub.docker.com/r/zenjoy/ruby) or GitHub Container Registry (GHCR)
-for AMD64 or ARM64.
+Available on [Docker Hub](https://hub.docker.com/r/zenjoy/ruby) or
+[GitHub Container Registry](https://ghcr.io/zenjoy/ruby) (GHCR) for AMD64 or ARM64.
 
 ```sh
 # Docker Hub
