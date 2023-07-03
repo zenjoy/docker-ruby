@@ -16,7 +16,8 @@ env:
 jobs:
   build:
     name: Build and publish image
-    runs-on: bare-metal
+    runs-on:
+      group: bare-metal
     strategy:
       fail-fast: false
       matrix:
