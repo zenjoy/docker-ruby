@@ -1,15 +1,14 @@
-ARG DEBIAN=bookworm
+ARG DEBIAN=bullseye
 ARG RUBY=3.3
 
 FROM debian:bullseye-slim AS base-bullseye
-FROM debian:bookworm-slim AS base-bookworm
 
-FROM base-bullseye AS ruby-2.6
+FROM base-${DEBIAN} AS ruby-2.6
 ENV RUBY_MAJOR 2.6
 ENV RUBY_VERSION 2.6.10
 ENV RUBY_DOWNLOAD_SHA256 5fd8ded51321b88fdc9c1b4b0eb1b951d2eddbc293865da0151612c2e814c1f2
 
-FROM base-bullseye AS ruby-2.7
+FROM base-${DEBIAN} AS ruby-2.7
 ENV RUBY_MAJOR 2.7
 ENV RUBY_VERSION 2.7.8
 ENV RUBY_DOWNLOAD_SHA256 f22f662da504d49ce2080e446e4bea7008cee11d5ec4858fc69000d0e5b1d7fb
