@@ -201,13 +201,17 @@ jobs:
             $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
 
       - name: Inspect image
+        id: inspect
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.metadata.outputs.version }}
+          DIGEST=$(docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.metadata.outputs.version }} | grep Digest | awk '{print $2}')
+          echo "IMAGE_DIGEST=$DIGEST" >> $GITHUB_OUTPUT
+          echo "Image digest: $DIGEST"
 
-      # - name: Sign container images
-      #   run: |
-      #     cosign sign --yes --recursive "docker.io/$IMAGE_NAME@$IMAGE_DIGEST"
-      #     cosign sign --yes --recursive "ghcr.io/$IMAGE_NAME@$IMAGE_DIGEST"
-      #   env:
-      #     IMAGE_NAME: ${{ env.REGISTRY_IMAGE }}
-      #     IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+      - name: Sign container images
+        run: |
+          cosign sign --yes --recursive "docker.io/$IMAGE_NAME@$IMAGE_DIGEST"
+          cosign sign --yes --recursive "ghcr.io/$IMAGE_NAME@$IMAGE_DIGEST"
+        env:
+          IMAGE_NAME: ${{ env.REGISTRY_IMAGE }}
+          IMAGE_DIGEST: ${{ steps.inspect.outputs.IMAGE_DIGEST }}
