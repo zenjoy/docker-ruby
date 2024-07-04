@@ -16,18 +16,18 @@ env:
 
 jobs:
   build:
-    name: Build and publish image
+    name: Build image
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         ruby: ['3.0']
-        debian: ['bookworm']
+        debian: ['bullseye']
         include:
           - os: ubuntu-latest-4-cores
             platform: linux/amd64
-          - os: ubuntu-22.04-arm
-            platform: linux/arm64
+          # - os: ubuntu-22.04-arm
+          #   platform: linux/arm64
 
     permissions:
       id-token: write # keyless Cosign signatures
