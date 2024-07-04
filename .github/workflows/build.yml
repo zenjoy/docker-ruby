@@ -8,6 +8,7 @@ on:
     branches: [main]
     paths:
       - 'Dockerfile'
+      - '.github/workflows/build.yml'
 
 env:
   COSIGN_EXPERIMENTAL: 1
