@@ -16,13 +16,12 @@ env:
 
 jobs:
   build:
-    name: Build image
+    name: Build Ruby ${{ matrix.ruby }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        ruby: ['3.0']
-        debian: ['bullseye']
+        ruby: ['3.0', '3.1']
         include:
           - os: ubuntu-latest
             platform: linux/amd64
@@ -105,7 +104,7 @@ jobs:
           build-args: |
             BUILD_AT=${{ steps.prepare.outputs.today }}
             RUBY=${{ matrix.ruby }}
-            DEBIAN=${{ matrix.debian }}
+            DEBIAN=bullseye
           platforms: ${{ matrix.platform }}
           outputs: |
             type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
@@ -126,13 +125,13 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      - name: Sign container images
-        run: |
-          cosign sign --yes --recursive "docker.io/$IMAGE_NAME@$IMAGE_DIGEST"
-          cosign sign --yes --recursive "ghcr.io/$IMAGE_NAME@$IMAGE_DIGEST"
-        env:
-          IMAGE_NAME: ${{ env.REGISTRY_IMAGE }}
-          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+      # - name: Sign container images
+      #   run: |
+      #     cosign sign --yes --recursive "docker.io/$IMAGE_NAME@$IMAGE_DIGEST"
+      #     cosign sign --yes --recursive "ghcr.io/$IMAGE_NAME@$IMAGE_DIGEST"
+      #   env:
+      #     IMAGE_NAME: ${{ env.REGISTRY_IMAGE }}
+      #     IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
 
   merge:
     runs-on: ubuntu-latest
