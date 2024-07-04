@@ -17,17 +17,17 @@ env:
 
 jobs:
   build:
-    name: Build Ruby ${{ matrix.ruby }} on ${{ matrix.os }}
+    name: Build Ruby ${{ matrix.ruby }} for ${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         ruby: ['3.0', '3.1']
-        os: [ubuntu-latest, ubuntu-22.04-arm]
+        os: [ubuntu-latest, ubuntu-22.04-arm-2-core]
         include:
           - os: ubuntu-latest
             platform: linux/amd64
-          - os: ubuntu-22.04-arm
+          - os: ubuntu-22.04-arm-2-core
             platform: linux/arm64
 
     permissions:
@@ -136,6 +136,7 @@ jobs:
       #     IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
 
   merge:
+    name: Generating Manifest for Ruby ${{ matrix.ruby }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -146,6 +147,9 @@ jobs:
       - build
 
     steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
       - name: Download digests
         uses: actions/download-artifact@v4
         with:
