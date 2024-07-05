@@ -1,14 +1,13 @@
-name: Build and push container images
+name: Build and push container images for Specific Ruby Version
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 1 * * 0' # weekly refresh on Sunday at 1am
-  push:
-    branches: [main]
-    paths:
-      - 'Dockerfile'
-      - '.github/workflows/build.yml'
+  workflow_call:
+    inputs:
+      ruby:
+        description: 'Ruby version'
+        required: true
+        type: string
 
 env:
   COSIGN_EXPERIMENTAL: 1
@@ -17,12 +16,11 @@ env:
 
 jobs:
   build:
-    name: Build Ruby ${{ matrix.ruby }} for ${{ matrix.platform }}
+    name: Build Ruby ${{ inputs.ruby }} for ${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        ruby: ['3.0', '3.1', '3.2', '3.3']
         os: [ubuntu-latest, ubuntu-22.04-arm-2-core]
         include:
           - os: ubuntu-latest
@@ -42,7 +40,7 @@ jobs:
       - name: Parse ruby version
         id: prepare
         run: |
-          RUBY_VERSION=$(grep -Eo 'RUBY_VERSION ${{ matrix.ruby }}.[0-9]+$' Dockerfile | cut -d ' ' -f2)
+          RUBY_VERSION=$(grep -Eo 'RUBY_VERSION ${{ inputs.ruby }}.[0-9]+$' Dockerfile | cut -d ' ' -f2)
           MAJOR=$(echo $RUBY_VERSION | cut -d . -f 1)
           MINOR=$(echo $RUBY_VERSION | cut -d . -f 2)
           PATCH=$(echo $RUBY_VERSION | cut -d . -f 3)
@@ -97,15 +95,15 @@ jobs:
           labels: ${{ steps.metadata.outputs.labels }}
           build-args: |
             BUILD_AT=${{ steps.prepare.outputs.today }}
-            RUBY=${{ matrix.ruby }}
+            RUBY=${{ inputs.ruby }}
             DEBIAN=bullseye
           platforms: linux/${{ matrix.platform }}
           outputs: |
             type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
           cache-from: |
-            type=registry,ref=${{ env.REGISTRY_IMAGE }}:buildcache-${{ matrix.platform }}-${{ matrix.ruby }}
+            type=registry,ref=${{ env.REGISTRY_IMAGE }}:buildcache-${{ matrix.platform }}-${{ inputs.ruby }}
           cache-to: |
-            type=registry,ref=${{ env.REGISTRY_IMAGE }}:buildcache-${{ matrix.platform }}-${{ matrix.ruby }},mode=max
+            type=registry,ref=${{ env.REGISTRY_IMAGE }}:buildcache-${{ matrix.platform }}-${{ inputs.ruby }},mode=max
 
       - name: Export digest
         run: |
@@ -116,13 +114,13 @@ jobs:
       - name: Upload digest
         uses: actions/upload-artifact@v4
         with:
-          name: digests-${{ matrix.ruby }}-${{ env.DEBIAN }}-${{ matrix.platform }}
+          name: digests-${{ inputs.ruby }}-${{ env.DEBIAN }}-${{ matrix.platform }}
           path: /tmp/digests/*
           if-no-files-found: error
           retention-days: 1
 
   merge:
-    name: Generating Manifest for Ruby ${{ matrix.ruby }}
+    name: Generating Manifest for Ruby ${{ inputs.ruby }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -148,13 +146,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: /tmp/digests
-          pattern: digests-${{ matrix.ruby }}-${{ env.DEBIAN }}-*
+          pattern: digests-${{ inputs.ruby }}-${{ env.DEBIAN }}-*
           merge-multiple: true
 
       - name: Parse ruby version
         id: prepare
         run: |
-          RUBY_VERSION=$(grep -Eo 'RUBY_VERSION ${{ matrix.ruby }}.[0-9]+$' Dockerfile | cut -d ' ' -f2)
+          RUBY_VERSION=$(grep -Eo 'RUBY_VERSION ${{ inputs.ruby }}.[0-9]+$' Dockerfile | cut -d ' ' -f2)
           MAJOR=$(echo $RUBY_VERSION | cut -d . -f 1)
           MINOR=$(echo $RUBY_VERSION | cut -d . -f 2)
           PATCH=$(echo $RUBY_VERSION | cut -d . -f 3)
