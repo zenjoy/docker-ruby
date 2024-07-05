@@ -22,3 +22,4 @@ jobs:
     uses: zenjoy/docker-ruby/.github/workflows/build.yml@main
     with:
       ruby: ${{ matrix.ruby }}
+    secrets: inherit
