@@ -14,7 +14,6 @@ on:
 jobs:
   build:
     name: Triggering Ruby ${{ matrix.ruby }} build
-    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
