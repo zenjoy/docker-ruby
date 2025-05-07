@@ -40,7 +40,9 @@ jobs:
       - name: Parse ruby version
         id: prepare
         run: |
-          RUBY_VERSION=$(grep -Eo 'RUBY_VERSION ${{ inputs.ruby }}.[0-9]+$' Dockerfile | cut -d ' ' -f2)
+          LATEST_PATCH=$(grep -E "^ENV RUBY_VERSION=${{ inputs.ruby }}\.[0-9]+$" Dockerfile | cut -d= -f2)
+          RUBY_VERSION=$(grep -Eo 'RUBY_VERSION=${{ inputs.ruby }}\.[0-9]+$' Dockerfile | cut -d '=' -f2)
+          echo "RUBY_VERSION=$RUBY_VERSION"
           MAJOR=$(echo $RUBY_VERSION | cut -d . -f 1)
           MINOR=$(echo $RUBY_VERSION | cut -d . -f 2)
           PATCH=$(echo $RUBY_VERSION | cut -d . -f 3)
@@ -148,7 +150,7 @@ jobs:
       - name: Parse ruby version
         id: prepare
         run: |
-          RUBY_VERSION=$(grep -Eo 'RUBY_VERSION ${{ inputs.ruby }}.[0-9]+$' Dockerfile | cut -d ' ' -f2)
+          RUBY_VERSION=$(grep -Eo 'RUBY_VERSION=${{ inputs.ruby }}\.[0-9]+$' Dockerfile | cut -d '=' -f2)
           MAJOR=$(echo $RUBY_VERSION | cut -d . -f 1)
           MINOR=$(echo $RUBY_VERSION | cut -d . -f 2)
           PATCH=$(echo $RUBY_VERSION | cut -d . -f 3)
