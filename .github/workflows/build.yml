@@ -121,7 +121,7 @@ jobs:
           touch "/tmp/digests/${digest#sha256:}"
 
       - name: Upload digest
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: digests-${{ inputs.ruby }}-${{ env.DEBIAN }}-${{ matrix.platform }}
           path: /tmp/digests/*
