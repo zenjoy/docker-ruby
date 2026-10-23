@@ -1,203 +1,124 @@
-ARG DEBIAN=bullseye
-ARG RUBY=3.3
+# syntax=docker/dockerfile:1
 
-FROM debian:bullseye-slim AS base-bullseye
+# Mirror of the official Docker Library image (docker-library/ruby, `<major.minor>/bookworm/Dockerfile`),
+# so `zenjoy/ruby:X.Y.Z-bookworm` is a drop-in for `ruby:X.Y.Z-bookworm`. Only the version pin is
+# lifted into build args, so a Ruby security release can be built before the official image lands.
+# Keep the RUN steps in sync with upstream; don't diverge.
+#
+# https://github.com/docker-library/ruby/blob/master/Dockerfile.template
 
-FROM base-${DEBIAN} AS ruby-2.6
-ENV RUBY_MAJOR=2.6
-ENV RUBY_VERSION=2.6.10
-ENV RUBY_DOWNLOAD_SHA256=5fd8ded51321b88fdc9c1b4b0eb1b951d2eddbc293865da0151612c2e814c1f2
+ARG DEBIAN_SUITE=bookworm
 
-FROM base-${DEBIAN} AS ruby-2.7
-ENV RUBY_MAJOR=2.7
-ENV RUBY_VERSION=2.7.8
-ENV RUBY_DOWNLOAD_SHA256=f22f662da504d49ce2080e446e4bea7008cee11d5ec4858fc69000d0e5b1d7fb
+FROM buildpack-deps:${DEBIAN_SUITE}
 
-FROM base-${DEBIAN} AS ruby-3.0
-ENV RUBY_MAJOR=3.0
-ENV RUBY_VERSION=3.0.7
-ENV RUBY_DOWNLOAD_SHA256=1748338373c4fad80129921080d904aca326e41bd9589b498aa5ee09fd575bab
+ARG RUBY_VERSION
+ARG RUBY_DOWNLOAD_SHA256
 
-FROM base-${DEBIAN} AS ruby-3.1
-ENV RUBY_MAJOR=3.1
-ENV RUBY_VERSION=3.1.7
-ENV RUBY_DOWNLOAD_SHA256=658acc455b6bda87ac6cc1380e86552b9c1af87055e7a127589c5bf7ed80b035
-
-FROM base-${DEBIAN} AS ruby-3.2
-ENV RUBY_MAJOR=3.2
-ENV RUBY_VERSION=3.2.10
-ENV RUBY_DOWNLOAD_SHA256=a64a8a910ac2f28834b2170dedea688f06cbc6431fcd65eb18cc49ddbf3826ae
-
-FROM base-${DEBIAN} AS ruby-3.3
-ENV RUBY_MAJOR=3.3
-ENV RUBY_VERSION=3.3.10
-ENV RUBY_DOWNLOAD_SHA256=3a06c3a709672a4ddae4e511d7e82f74799b8b3f550c8cf2d6f32089003cb84c
-
-FROM base-${DEBIAN} AS ruby-3.4
-ENV RUBY_MAJOR=3.4
-ENV RUBY_VERSION=3.4.8
-ENV RUBY_DOWNLOAD_SHA256=53a8ec71111449cbbd42224d8d27c493fa6ded228636731051c48604d4255d68
-
-FROM base-${DEBIAN} AS ruby-4.0
-ENV RUBY_MAJOR=4.0
-ENV RUBY_VERSION=4.0.1
-ENV RUBY_DOWNLOAD_SHA256=0531fe57dfdb56bf591620d2450642ea0e0964f3512a6ebee7dc9305de69395f
-
-FROM ruby-${RUBY} AS release
-
-# skip installing gem documentation
-RUN mkdir -p /usr/local/etc \
-  && { \
-  echo 'install: --no-document'; \
-  echo 'update: --no-document'; \
-  } >> /usr/local/etc/gemrc
+# skip installing gem documentation with `gem install`/`gem update`
+RUN set -eux; \
+	mkdir -p /usr/local/etc; \
+	echo 'gem: --no-document' >> /usr/local/etc/gemrc
 
 ENV LANG=C.UTF-8
-ENV RUBY_MAJOR=$RUBY_MAJOR
-ENV RUBY_VERSION=$RUBY_VERSION
-ENV RUBY_DOWNLOAD_SHA256=$RUBY_DOWNLOAD_SHA256
 
-ARG BUILD_AT
-ENV BUILD_AT=$BUILD_AT
-
-ARG ENABLE_YJIT=false
-ENV ENABLE_YJIT=$ENABLE_YJIT
-
-RUN set -eux; \
-  apt-get update; \
-  apt-get install -y --no-install-recommends \
-    bzip2 \
-    ca-certificates \
-    libffi-dev \
-    libgmp-dev \
-    libssl-dev \
-    libyaml-dev \
-    procps \
-    zlib1g-dev \
-  ; \
-  rm -rf /var/lib/apt/lists/*
-
-# skip installing gem documentation
-RUN set -eux; \
-  mkdir -p /usr/local/etc; \
-  { \
-    echo 'install: --no-document'; \
-    echo 'update: --no-document'; \
-  } >> /usr/local/etc/gemrc
+ENV RUBY_VERSION=${RUBY_VERSION}
+ENV RUBY_DOWNLOAD_URL=https://cache.ruby-lang.org/pub/ruby/${RUBY_VERSION%.*}/ruby-${RUBY_VERSION}.tar.xz
+ENV RUBY_DOWNLOAD_SHA256=${RUBY_DOWNLOAD_SHA256}
 
 # some of ruby's build scripts are written in ruby
 #   we purge system ruby later to make sure our final image uses what we just built
 RUN set -eux; \
-  \
-  savedAptMark="$(apt-mark showmanual)"; \
-  apt-get update; \
-  apt-get install -y --no-install-recommends \
-    bison \
-    dpkg-dev \
-    libgdbm-dev \
-    ruby \
-    autoconf \
-    g++ \
-    gcc \
-    libbz2-dev \
-    libgdbm-compat-dev \
-    libglib2.0-dev \
-    libncurses-dev \
-    libreadline-dev \
-    libxml2-dev \
-    libxslt-dev \
-    make \
-    wget \
-    xz-utils \
-  ; \
-  rm -rf /var/lib/apt/lists/*; \
-  \
-  # Install Rust for YJIT if enabled and Ruby version >= 3.2
-  if [ "$ENABLE_YJIT" = "true" ] && [ "${RUBY_MAJOR}" != "2.6" ] && [ "${RUBY_MAJOR}" != "2.7" ] && [ "${RUBY_MAJOR}" != "3.0" ] && [ "${RUBY_MAJOR}" != "3.1" ]; then \
-    rustArch=; \
-    dpkgArch="$(dpkg --print-architecture)"; \
-    case "$dpkgArch" in \
-      'amd64') rustArch='x86_64-unknown-linux-gnu'; rustupUrl='https://static.rust-lang.org/rustup/archive/1.27.1/x86_64-unknown-linux-gnu/rustup-init'; rustupSha256='6aeece6993e902708983b209d04c0d1dbb14ebb405ddb87def578d41f920f56d' ;; \
-      'arm64') rustArch='aarch64-unknown-linux-gnu'; rustupUrl='https://static.rust-lang.org/rustup/archive/1.27.1/aarch64-unknown-linux-gnu/rustup-init'; rustupSha256='1cffbf51e63e634c746f741de50649bbbcbd9dbe1de363c9ecef64e278dba2b2' ;; \
-    esac; \
-    \
-    if [ -n "$rustArch" ]; then \
-      mkdir -p /tmp/rust; \
-      \
-      wget -O /tmp/rust/rustup-init "$rustupUrl"; \
-      echo "$rustupSha256 */tmp/rust/rustup-init" | sha256sum --check --strict; \
-      chmod +x /tmp/rust/rustup-init; \
-      \
-      export RUSTUP_HOME='/tmp/rust/rustup' CARGO_HOME='/tmp/rust/cargo'; \
-      export PATH="$CARGO_HOME/bin:$PATH"; \
-      /tmp/rust/rustup-init -y --no-modify-path --profile minimal --default-toolchain '1.84.0' --default-host "$rustArch"; \
-      \
-      rustc --version; \
-      cargo --version; \
-    fi; \
-  fi; \
-  \
-  wget -O ruby.tar.xz "https://cache.ruby-lang.org/pub/ruby/${RUBY_MAJOR%-rc}/ruby-$RUBY_VERSION.tar.xz"; \
-  echo "$RUBY_DOWNLOAD_SHA256 *ruby.tar.xz" | sha256sum --check --strict; \
-  \
-  mkdir -p /usr/src/ruby; \
-  tar -xJf ruby.tar.xz -C /usr/src/ruby --strip-components=1; \
-  rm ruby.tar.xz; \
-  \
-  cd /usr/src/ruby; \
-  \
-  # hack in "ENABLE_PATH_CHECK" disabling to suppress:
-  #   warning: Insecure world writable dir
-  { \
-    echo '#define ENABLE_PATH_CHECK 0'; \
-    echo; \
-    cat file.c; \
-  } > file.c.new; \
-  mv file.c.new file.c; \
-  \
-  autoconf; \
-  gnuArch="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)"; \
-  ./configure \
-    --build="$gnuArch" \
-    --disable-install-doc \
-    --enable-shared \
-    ${rustArch:+--enable-yjit} \
-  ; \
-  make -j "$(nproc)"; \
-  make install; \
-  \
-  rm -rf /tmp/rust; \
-  apt-mark auto '.*' > /dev/null; \
-  apt-mark manual $savedAptMark > /dev/null; \
-  find /usr/local -type f -executable -not \( -name '*tkinter*' \) -exec ldd '{}' ';' \
-    | awk '/=>/ { so = $(NF-1); if (index(so, "/usr/local/") == 1) { next }; gsub("^/(usr/)?", "", so); print so }' \
-    | sort -u \
-    | xargs -r dpkg-query --search \
-    | cut -d: -f1 \
-    | sort -u \
-    | xargs -r apt-mark manual \
-  ; \
-  apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false; \
-  \
-  cd /; \
-  rm -r /usr/src/ruby; \
-  # verify we have no "ruby" packages installed
-  if dpkg -l | grep -i ruby; then exit 1; fi; \
-  [ "$(command -v ruby)" = '/usr/local/bin/ruby' ]; \
-  # update bundler to latest version
-  gem update --system; \
-  gem install bundler; \
-  # rough smoke test
-  ruby --version; \
-  gem --version; \
-  bundle --version
+	[ -n "$RUBY_VERSION" ] && [ -n "$RUBY_DOWNLOAD_SHA256" ]; \
+	\
+	savedAptMark="$(apt-mark showmanual)"; \
+	apt-get update; \
+	apt-get install -y --no-install-recommends \
+		dpkg-dev \
+		libgdbm-dev \
+		ruby \
+	; \
+	\
+	rustArch=; \
+	dpkgArch="$(dpkg --print-architecture)"; \
+	case "$dpkgArch" in \
+		'amd64') rustArch='x86_64-unknown-linux-gnu'; rustupUrl='https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-unknown-linux-gnu/rustup-init'; rustupSha256='20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c' ;; \
+		'arm64') rustArch='aarch64-unknown-linux-gnu'; rustupUrl='https://static.rust-lang.org/rustup/archive/1.28.2/aarch64-unknown-linux-gnu/rustup-init'; rustupSha256='e3853c5a252fca15252d07cb23a1bdd9377a8c6f3efa01531109281ae47f841c' ;; \
+	esac; \
+	\
+	if [ -n "$rustArch" ]; then \
+		mkdir -p /tmp/rust; \
+		\
+		wget -O /tmp/rust/rustup-init "$rustupUrl"; \
+		echo "$rustupSha256 */tmp/rust/rustup-init" | sha256sum --check --strict; \
+		chmod +x /tmp/rust/rustup-init; \
+		\
+		export RUSTUP_HOME='/tmp/rust/rustup' CARGO_HOME='/tmp/rust/cargo'; \
+		export PATH="$CARGO_HOME/bin:$PATH"; \
+		/tmp/rust/rustup-init -y --no-modify-path --profile minimal --default-toolchain '1.91.1' --default-host "$rustArch"; \
+		\
+		rustc --version; \
+		cargo --version; \
+	fi; \
+	\
+	wget -O ruby.tar.xz "$RUBY_DOWNLOAD_URL"; \
+	echo "$RUBY_DOWNLOAD_SHA256 *ruby.tar.xz" | sha256sum --check --strict; \
+	\
+	mkdir -p /usr/src/ruby; \
+	tar -xJf ruby.tar.xz -C /usr/src/ruby --strip-components=1; \
+	rm ruby.tar.xz; \
+	\
+	cd /usr/src/ruby; \
+	\
+	autoconf; \
+	gnuArch="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)"; \
+# ZJIT only exists from Ruby 4.0; upstream's 3.x templates leave the flag out
+	zjit=; \
+	case "$RUBY_VERSION" in 3.*) ;; *) zjit="${rustArch:+--enable-zjit}" ;; esac; \
+# full RELRO: "-z now" disables lazy binding so the loader can map the GOT read-only at startup
+# https://github.com/docker-library/ruby/pull/529
+	export LDFLAGS='-Wl,-z,relro -Wl,-z,now'; \
+	./configure \
+		--build="$gnuArch" \
+		--disable-install-doc \
+		--enable-shared \
+		${rustArch:+--enable-yjit} \
+		$zjit \
+	; \
+	make -j "$(nproc)"; \
+	make install; \
+	\
+	rm -rf /tmp/rust; \
+	apt-mark auto '.*' > /dev/null; \
+	apt-mark manual $savedAptMark > /dev/null; \
+	find /usr/local -type f -executable -not \( -name '*tkinter*' \) -exec ldd '{}' ';' \
+		| awk '/=>/ { so = $(NF-1); if (index(so, "/usr/local/") == 1) { next }; gsub("^/(usr/)?", "", so); printf "*%s\n", so }' \
+		| sort -u \
+		| xargs -r dpkg-query --search \
+		| awk 'sub(":$", "", $1) { print $1 }' \
+		| sort -u \
+		| xargs -r apt-mark manual \
+	; \
+	apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false; \
+	rm -rf /var/lib/apt/lists/*; \
+	\
+	cd /; \
+	rm -r /usr/src/ruby; \
+# verify we have no "ruby" packages installed
+	if dpkg -l | grep -i ruby; then exit 1; fi; \
+	[ "$(command -v ruby)" = '/usr/local/bin/ruby' ]; \
+# rough smoke test
+	ruby --version; \
+	gem --version; \
+	bundle --version
 
 # don't create ".bundle" in all our apps
 ENV GEM_HOME=/usr/local/bundle
-ENV BUNDLE_PATH="$GEM_HOME" \
-  BUNDLE_SILENCE_ROOT_WARNING=1 \
-  BUNDLE_APP_CONFIG="$GEM_HOME" \
-  LANG=C.UTF-8 LC_ALL=C.UTF-8
+ENV BUNDLE_SILENCE_ROOT_WARNING=1 \
+	BUNDLE_APP_CONFIG="$GEM_HOME"
 ENV PATH=$GEM_HOME/bin:$PATH
+RUN set -eux; \
+	mkdir "$GEM_HOME"; \
+# adjust permissions of GEM_HOME for running "gem install" as an arbitrary user
+	chmod 1777 "$GEM_HOME"
 
 CMD [ "irb" ]
