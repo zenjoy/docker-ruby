@@ -1,224 +1,193 @@
-name: Build and push container images for Specific Ruby Version
+name: Build Ruby image
+
+# Break-glass build of `zenjoy/ruby:X.Y.Z-bookworm` when a Ruby (security) release is out and the
+# official `ruby:X.Y.Z-bookworm` image hasn't landed yet. Run it from the Actions tab with the version
+# and the tarball SHA256 from the ruby-lang.org release post. Pull requests only build (no push).
 
 on:
   workflow_dispatch:
-  workflow_call:
     inputs:
-      ruby:
-        description: 'Ruby version'
+      ruby_version:
+        description: 'Ruby version, e.g. 4.0.9'
         required: true
         type: string
+      ruby_sha256:
+        description: 'SHA256 of ruby-X.Y.Z.tar.xz (from the ruby-lang.org release post)'
+        required: true
+        type: string
+  pull_request:
+    paths:
+      - 'Dockerfile'
+      - '.github/workflows/build.yml'
+
 env:
-  COSIGN_EXPERIMENTAL: 1
   REGISTRY_IMAGE: zenjoy/ruby
-  DEBIAN: bullseye
+  DEBIAN_SUITE: bookworm
+  # Version pull requests build as a smoke test.
+  PR_RUBY_VERSION: 4.0.9
+  PR_RUBY_SHA256: a8057adb39f51ad6dc3106237504c93dd792bb515837b4fe7817ae21ed7e51f4
+
+concurrency:
+  group: build-${{ github.event_name }}-${{ inputs.ruby_version || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   build:
-    name: Build Ruby ${{ inputs.ruby }} for ${{ matrix.platform }}
+    name: Build Ruby ${{ inputs.ruby_version || 'PR smoke' }} (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-22.04-arm-2-core]
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             platform: amd64
-          - os: ubuntu-22.04-arm-2-core
+          - os: ubuntu-24.04-arm
             platform: arm64
-
-    permissions:
-      id-token: write # keyless Cosign signatures
-      packages: write # GHCR
-      contents: write # git tags
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
-      - name: Parse ruby version
-        id: prepare
+      - name: Resolve and verify Ruby version
+        id: ruby
+        env:
+          RUBY_VERSION: ${{ inputs.ruby_version || env.PR_RUBY_VERSION }}
+          RUBY_SHA256: ${{ inputs.ruby_sha256 || env.PR_RUBY_SHA256 }}
         run: |
-          LATEST_PATCH=$(grep -E "^ENV RUBY_VERSION=${{ inputs.ruby }}\.[0-9]+$" Dockerfile | cut -d= -f2)
-          RUBY_VERSION=$(grep -Eo 'RUBY_VERSION=${{ inputs.ruby }}\.[0-9]+$' Dockerfile | cut -d '=' -f2)
-          echo "RUBY_VERSION=$RUBY_VERSION"
-          MAJOR=$(echo $RUBY_VERSION | cut -d . -f 1)
-          MINOR=$(echo $RUBY_VERSION | cut -d . -f 2)
-          PATCH=$(echo $RUBY_VERSION | cut -d . -f 3)
-          TODAY=$(date +%Y-%m-%d)
-          echo "major=$MAJOR" | tee -a $GITHUB_OUTPUT
-          echo "minor=$MINOR" | tee -a $GITHUB_OUTPUT
-          echo "patch=$PATCH" | tee -a $GITHUB_OUTPUT
-          echo "version=$RUBY_VERSION" | tee -a $GITHUB_OUTPUT
-          echo "today=${TODAY}" | tee -a $GITHUB_OUTPUT
-
-          # Determine if YJIT should be enabled (for Ruby 3.2+)
-          ENABLE_YJIT="false"
-          if [ "$MAJOR" -ge 3 ] && [ "$MINOR" -ge 2 ]; then
-            ENABLE_YJIT="true"
-          fi
-          echo "enable_yjit=${ENABLE_YJIT}" | tee -a $GITHUB_OUTPUT
-
-      - name: Generate build tag from head
-        id: branch
-        run: |
-          export GIT_REF=${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}
-          echo "branch=$(echo ${GIT_REF,,} | sed 's/[^a-zA-Z0-9]/-/g')" | tee -a $GITHUB_OUTPUT
-
-      - name: Generate Docker metadata with ruby version
-        uses: docker/metadata-action@v5
-        id: metadata
-        with:
-          flavor: |
-            latest=${{ matrix.ruby == '3.3' }}
-          images: |
-            docker.io/${{ env.REGISTRY_IMAGE }}
-            ghcr.io/${{ env.REGISTRY_IMAGE }}
-          tags: |
-            type=semver,pattern={{version}},value=v${{ steps.prepare.outputs.version }}
-            type=semver,pattern={{major}}.{{minor}},value=v${{ steps.prepare.outputs.version }}
-          labels: |
-            org.opencontainers.image.title=ruby
+          set -euo pipefail
+          [[ "$RUBY_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::bad version '$RUBY_VERSION'"; exit 1; }
+          [[ "$RUBY_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::bad sha256"; exit 1; }
+          # Second source for the checksum: the release index on cache.ruby-lang.org.
+          indexed="$(curl -fsSL https://cache.ruby-lang.org/pub/ruby/index.txt | awk -v n="ruby-$RUBY_VERSION" '$1 == n && $2 ~ /\.tar\.xz$/ { print $4 }')"
+          [ "$indexed" = "$RUBY_SHA256" ] || { echo "::error::sha256 does not match cache.ruby-lang.org/pub/ruby/index.txt ('$indexed')"; exit 1; }
+          {
+            echo "version=$RUBY_VERSION"
+            echo "minor=${RUBY_VERSION%.*}"
+            echo "sha256=$RUBY_SHA256"
+          } | tee -a "$GITHUB_OUTPUT"
 
       - name: Login to Docker Hub
-        uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_HUB_USER }}
           password: ${{ secrets.DOCKER_HUB_PASSWORD }}
 
-      - name: Login to GitHub Container Repository
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build container image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         id: build
         with:
-          labels: ${{ steps.metadata.outputs.labels }}
           build-args: |
-            BUILD_AT=${{ steps.prepare.outputs.today }}
-            RUBY=${{ inputs.ruby }}
-            DEBIAN=bullseye
-            ENABLE_YJIT=${{ steps.prepare.outputs.enable_yjit }}
+            DEBIAN_SUITE=${{ env.DEBIAN_SUITE }}
+            RUBY_VERSION=${{ steps.ruby.outputs.version }}
+            RUBY_DOWNLOAD_SHA256=${{ steps.ruby.outputs.sha256 }}
           platforms: linux/${{ matrix.platform }}
-          outputs: |
-            type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: |
-            type=registry,ref=${{ env.REGISTRY_IMAGE }}:buildcache-${{ matrix.platform }}-${{ inputs.ruby }}
-          cache-to: |
-            type=registry,ref=${{ env.REGISTRY_IMAGE }}:buildcache-${{ matrix.platform }}-${{ inputs.ruby }},mode=max
+          labels: |
+            org.opencontainers.image.title=ruby
+            org.opencontainers.image.version=${{ steps.ruby.outputs.version }}-${{ env.DEBIAN_SUITE }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          outputs: ${{ github.event_name == 'pull_request' && 'type=docker,name=ruby-smoke' || format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true', env.REGISTRY_IMAGE) }}
+          cache-from: type=registry,ref=${{ env.REGISTRY_IMAGE }}:buildcache-${{ matrix.platform }}-${{ steps.ruby.outputs.minor }}-${{ env.DEBIAN_SUITE }}
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}:buildcache-{1}-{2}-{3},mode=max', env.REGISTRY_IMAGE, matrix.platform, steps.ruby.outputs.minor, env.DEBIAN_SUITE) || '' }}
+
+      - name: Smoke test
+        env:
+          IMAGE: ${{ github.event_name == 'pull_request' && 'ruby-smoke' || format('{0}@{1}', env.REGISTRY_IMAGE, steps.build.outputs.digest) }}
+          RUBY_VERSION: ${{ steps.ruby.outputs.version }}
+        run: |
+          docker run --rm -e EXPECTED="$RUBY_VERSION" "$IMAGE" ruby -e '
+            abort "ruby #{RUBY_VERSION} != #{ENV["EXPECTED"]}" unless RUBY_VERSION == ENV["EXPECTED"]
+            abort "built without YJIT" unless defined?(RubyVM::YJIT)
+            require "openssl"; require "psych"; require "zlib"
+            puts RUBY_DESCRIPTION, OpenSSL::OPENSSL_LIBRARY_VERSION
+          '
 
       - name: Export digest
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           mkdir -p /tmp/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "/tmp/digests/${digest#sha256:}"
+          touch "/tmp/digests/${DIGEST#sha256:}"
 
       - name: Upload digest
-        uses: actions/upload-artifact@v5
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v7
         with:
-          name: digests-${{ inputs.ruby }}-${{ env.DEBIAN }}-${{ matrix.platform }}
+          name: digests-${{ steps.ruby.outputs.version }}-${{ env.DEBIAN_SUITE }}-${{ matrix.platform }}
           path: /tmp/digests/*
           if-no-files-found: error
           retention-days: 1
 
   merge:
-    name: Generating Manifest for Ruby ${{ inputs.ruby }}
-    runs-on: ubuntu-latest
-
+    name: Publish Ruby ${{ inputs.ruby_version }} manifest
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
     needs:
       - build
 
     permissions:
+      contents: read
       id-token: write # keyless Cosign signatures
       packages: write # GHCR
-      contents: write # git tags
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v5
-
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v4.0.0
+        uses: sigstore/cosign-installer@v4.1.2
 
       - name: Download digests
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           path: /tmp/digests
-          pattern: digests-${{ inputs.ruby }}-${{ env.DEBIAN }}-*
+          pattern: digests-${{ inputs.ruby_version }}-${{ env.DEBIAN_SUITE }}-*
           merge-multiple: true
 
-      - name: Parse ruby version
-        id: prepare
-        run: |
-          RUBY_VERSION=$(grep -Eo 'RUBY_VERSION=${{ inputs.ruby }}\.[0-9]+$' Dockerfile | cut -d '=' -f2)
-          MAJOR=$(echo $RUBY_VERSION | cut -d . -f 1)
-          MINOR=$(echo $RUBY_VERSION | cut -d . -f 2)
-          PATCH=$(echo $RUBY_VERSION | cut -d . -f 3)
-          TODAY=$(date +%Y-%m-%d)
-          echo "major=$MAJOR" | tee -a $GITHUB_OUTPUT
-          echo "minor=$MINOR" | tee -a $GITHUB_OUTPUT
-          echo "patch=$PATCH" | tee -a $GITHUB_OUTPUT
-          echo "version=$RUBY_VERSION" | tee -a $GITHUB_OUTPUT
-          echo "today=${TODAY}" | tee -a $GITHUB_OUTPUT
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Generate Docker metadata with ruby version
-        uses: docker/metadata-action@v5
-        id: metadata
-        with:
-          flavor: |
-            latest=${{ inputs.ruby == '3.3' }}
-          images: |
-            docker.io/${{ env.REGISTRY_IMAGE }}
-            ghcr.io/${{ env.REGISTRY_IMAGE }}
-          tags: |
-            type=semver,pattern={{version}},value=v${{ steps.prepare.outputs.version }}
-            type=semver,pattern={{major}}.{{minor}},value=v${{ steps.prepare.outputs.version }}
-          labels: |
-            org.opencontainers.image.title=ruby
-
       - name: Login to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_HUB_USER }}
           password: ${{ secrets.DOCKER_HUB_PASSWORD }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GitHub Container Repository
-        uses: docker/login-action@v3
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - name: Create manifest list and push
-        working-directory: /tmp/digests
-        run: |
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
 
-      - name: Inspect image
-        id: inspect
+      - name: Create manifest list and push
+        id: manifest
+        working-directory: /tmp/digests
+        env:
+          RUBY_VERSION: ${{ inputs.ruby_version }}
         run: |
-          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.metadata.outputs.version }}
-          DIGEST=$(docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.metadata.outputs.version }} | grep Digest | awk '{print $2}')
-          echo "IMAGE_DIGEST=$DIGEST" >> $GITHUB_OUTPUT
-          echo "Image digest: $DIGEST"
+          set -euo pipefail
+          tags=()
+          for registry in docker.io ghcr.io; do
+            tags+=(-t "$registry/$REGISTRY_IMAGE:$RUBY_VERSION-$DEBIAN_SUITE")
+            tags+=(-t "$registry/$REGISTRY_IMAGE:${RUBY_VERSION%.*}-$DEBIAN_SUITE")
+          done
+          sources=()
+          for digest in *; do sources+=("$REGISTRY_IMAGE@sha256:$digest"); done
+          [ "${#sources[@]}" -eq 2 ] || { echo "::error::expected 2 platform digests, got ${#sources[@]}"; exit 1; }
+          docker buildx imagetools create "${tags[@]}" "${sources[@]}"
+          ref="$REGISTRY_IMAGE:$RUBY_VERSION-$DEBIAN_SUITE"
+          docker buildx imagetools inspect "$ref"
+          echo "digest=$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest}}' | jq -r .digest)" | tee -a "$GITHUB_OUTPUT"
 
       - name: Sign container images
-        run: |
-          cosign sign --yes --recursive "docker.io/$IMAGE_NAME@$IMAGE_DIGEST"
-          cosign sign --yes --recursive "ghcr.io/$IMAGE_NAME@$IMAGE_DIGEST"
         env:
-          IMAGE_NAME: ${{ env.REGISTRY_IMAGE }}
-          IMAGE_DIGEST: ${{ steps.inspect.outputs.IMAGE_DIGEST }}
+          DIGEST: ${{ steps.manifest.outputs.digest }}
+        run: |
+          cosign sign --yes --recursive "docker.io/$REGISTRY_IMAGE@$DIGEST"
+          cosign sign --yes --recursive "ghcr.io/$REGISTRY_IMAGE@$DIGEST"
