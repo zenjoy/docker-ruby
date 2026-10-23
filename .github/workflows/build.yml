@@ -1,8 +1,9 @@
 name: Build Ruby image
 
-# Break-glass build of `zenjoy/ruby:X.Y.Z-bookworm` when a Ruby (security) release is out and the
-# official `ruby:X.Y.Z-bookworm` image hasn't landed yet. Run it from the Actions tab with the version
-# and the tarball SHA256 from the ruby-lang.org release post. Pull requests only build (no push).
+# Break-glass build of `zenjoy/ruby:X.Y.Z-<suite>` when a Ruby (security) release is out and the
+# official `ruby:X.Y.Z-<suite>` image hasn't landed yet. Run it from the Actions tab with the version,
+# the tarball SHA256 from the ruby-lang.org release post and the Debian suite. Pull requests only
+# build (no push).
 
 on:
   workflow_dispatch:
@@ -15,6 +16,14 @@ on:
         description: 'SHA256 of ruby-X.Y.Z.tar.xz (from the ruby-lang.org release post)'
         required: true
         type: string
+      debian_suite:
+        description: 'Debian suite of the base image'
+        required: true
+        type: choice
+        options:
+          - trixie
+          - bookworm
+        default: trixie
   pull_request:
     paths:
       - 'Dockerfile'
@@ -22,13 +31,14 @@ on:
 
 env:
   REGISTRY_IMAGE: zenjoy/ruby
-  DEBIAN_SUITE: bookworm
+  # Pull requests build trixie.
+  DEBIAN_SUITE: ${{ inputs.debian_suite || 'trixie' }}
   # Version pull requests build as a smoke test.
   PR_RUBY_VERSION: 4.0.9
   PR_RUBY_SHA256: a8057adb39f51ad6dc3106237504c93dd792bb515837b4fe7817ae21ed7e51f4
 
 concurrency:
-  group: build-${{ github.event_name }}-${{ inputs.ruby_version || github.ref }}
+  group: build-${{ github.event_name }}-${{ inputs.ruby_version || github.ref }}-${{ inputs.debian_suite }}
   cancel-in-progress: false
 
 permissions:
@@ -36,7 +46,7 @@ permissions:
 
 jobs:
   build:
-    name: Build Ruby ${{ inputs.ruby_version || 'PR smoke' }} (${{ matrix.platform }})
+    name: Build Ruby ${{ inputs.ruby_version || 'PR smoke' }}-${{ inputs.debian_suite || 'trixie' }} (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -127,7 +137,7 @@ jobs:
           retention-days: 1
 
   merge:
-    name: Publish Ruby ${{ inputs.ruby_version }} manifest
+    name: Publish Ruby ${{ inputs.ruby_version }}-${{ inputs.debian_suite }} manifest
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     needs:

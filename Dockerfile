@@ -1,16 +1,18 @@
 # syntax=docker/dockerfile:1
 
-# Mirror of the official Docker Library image (docker-library/ruby, `<major.minor>/bookworm/Dockerfile`),
-# so `zenjoy/ruby:X.Y.Z-bookworm` is a drop-in for `ruby:X.Y.Z-bookworm`. Only the version pin is
-# lifted into build args, so a Ruby security release can be built before the official image lands.
+# Mirror of the official Docker Library image (docker-library/ruby, `<major.minor>/<suite>/Dockerfile`;
+# bookworm and trixie share the template), so `zenjoy/ruby:X.Y.Z-trixie` is a drop-in for
+# `ruby:X.Y.Z-trixie`. Only the version pin and the Debian suite are lifted into build args, so a Ruby
+# security release can be built before the official image lands.
 # Keep the RUN steps in sync with upstream; don't diverge.
 #
 # https://github.com/docker-library/ruby/blob/master/Dockerfile.template
 
-ARG DEBIAN_SUITE=bookworm
+ARG DEBIAN_SUITE=trixie
 
 FROM buildpack-deps:${DEBIAN_SUITE}
 
+ARG DEBIAN_SUITE
 ARG RUBY_VERSION
 ARG RUBY_DOWNLOAD_SHA256
 
@@ -99,7 +101,8 @@ RUN set -eux; \
 		| xargs -r apt-mark manual \
 	; \
 	apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false; \
-	rm -rf /var/lib/apt/lists/*; \
+# upstream: `apt-get dist-clean` on trixie and later, bookworm's apt doesn't have it
+	case "$DEBIAN_SUITE" in bookworm) rm -rf /var/lib/apt/lists/* ;; *) apt-get dist-clean ;; esac; \
 	\
 	cd /; \
 	rm -r /usr/src/ruby; \
